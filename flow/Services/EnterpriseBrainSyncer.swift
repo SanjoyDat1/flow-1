@@ -159,6 +159,39 @@ final class EnterpriseBrainSyncer {
 
     // MARK: - Enqueue for Sync
 
+    /// Build incremental payload — only facts captured since last successful sync.
+    private func buildIncrementalPayload(from payload: PenloPayload) -> [String: Any]? {
+        guard let data = try? JSONEncoder().encode(payload),
+              var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+
+        if let lastSync = getLastSyncDate() {
+            if var facts = dict["facts"] as? [[String: Any]] {
+                facts = facts.filter { fact in
+                    guard let capturedStr = fact["capturedAt"] as? String,
+                          let captured = ISO8601DateFormatter().date(from: capturedStr) else {
+                        return true
+                    }
+                    return captured > lastSync
+                }
+                dict["facts"] = facts
+            }
+            if var vaultFiles = dict["vaultFiles"] as? [[String: Any]] {
+                vaultFiles = vaultFiles.filter { file in
+                    guard let modifiedStr = file["lastModified"] as? String,
+                          let modified = ISO8601DateFormatter().date(from: modifiedStr) else {
+                        return true
+                    }
+                    return modified > lastSync
+                }
+                dict["vaultFiles"] = vaultFiles
+            }
+        }
+
+        return dict
+    }
+
     /// Enqueue a transcript for sync. If the endpoint is configured, attempts
     /// immediate sync. On failure, buffers the payload in SyncQueue.
     func enqueueAndSync(transcript: Transcript) async {
@@ -174,9 +207,19 @@ final class EnterpriseBrainSyncer {
             return
         }
 
-        var payloadDict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard var payloadDict = buildIncrementalPayload(from: payload) else { return }
         let syncTimestamp = PenloTimestamp.now()
         payloadDict["syncedAt"] = syncTimestamp
+        payloadDict["deviceID"] = PenloDevice.identifier
+        payloadDict["userEmail"] = userEmail
+
+        if let facts = payloadDict["facts"] as? [[String: Any]], facts.isEmpty,
+           getLastSyncDate() != nil {
+            try? await persistenceActor?.markSynced(transcriptID: transcript.id)
+            log("Skipped sync — no new facts since last sync")
+            return
+        }
+
         let result = await syncWithBackoff(payloadDict: payloadDict)
 
         if result.ok {
