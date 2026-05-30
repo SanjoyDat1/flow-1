@@ -89,7 +89,7 @@ struct HomeChatView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            HardwareManagementSheet(bluetooth: bluetooth)
+            HardwareManagementSheet(bluetooth: bluetooth, brainSyncer: brainSyncer)
         }
         .sheet(isPresented: $showVault) {
             StagingVaultSheet(brainSyncer: brainSyncer)
