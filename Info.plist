@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>fetch</string>
+		<string>audio</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.getflow.flow.calendar-refresh</string>
+	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Penlo uses the microphone to listen and transcribe your conversations so it can extract key facts, people, and decisions for your knowledge graph.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Penlo uses on-device speech recognition to convert your spoken words into text efficiently without sending audio to the cloud.</string>
+</dict>
+</plist>

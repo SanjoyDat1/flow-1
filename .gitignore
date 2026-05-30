@@ -1,0 +1,64 @@
+# ── Secrets & local config (never commit) ─────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.mobileprovision
+GoogleService-Info.plist
+secrets/
+credentials.json
+
+# ── macOS ─────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+*.swp
+*~
+
+# ── Xcode / iOS ───────────────────────────────────────────────────────
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xccheckout
+*.xcscmblueprint
+timeline.xctimeline
+playground.xcworkspace
+
+# ── Swift Package Manager ─────────────────────────────────────────────
+.build/
+Packages/
+Package.resolved
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
+# ── Python (audio-pipeline) ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Pipeline runtime artifacts (regenerated locally)
+audio-pipeline/output/*.json
+audio-pipeline/failed/*.txt
+audio-pipeline/failed/*.error.txt
+audio-pipeline/processed/*.txt
+audio-pipeline/queue/*.json
+audio-pipeline/transcripts/*.txt
+!audio-pipeline/transcripts/20260529_104800_sample_meeting.txt
+
+# ── Penlo sync diagnostics (may contain payload snippets) ───────────────
+penlo_sync.log
+
+# ── Cursor / IDE ──────────────────────────────────────────────────────
+.cursor/
+.vscode/

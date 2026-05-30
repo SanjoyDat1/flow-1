@@ -1,0 +1,7 @@
+Okay, um, so this is the Tuesday sync. Sarah Chen kicked things off saying she's
+working on the new API rate limiter for Acme Corp, and, you know, it's blocked by
+the legacy auth service. Then someone — I think it was the backend lead — said the
+dashboard redesign is basically done, just needs QA. We decided to ship the
+notifications feature on Friday. Oh, and David Okafor mentioned you can reach him at
+david.okafor@acme.com if there are any deployment questions. He owns the infra team.
+Right, and the client, Globex, wants a demo by end of month.
