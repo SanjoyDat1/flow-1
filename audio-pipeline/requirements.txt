@@ -6,3 +6,6 @@ pydantic>=2.6.0         # Strict runtime data validation (Pydantic v2)
 python-dotenv>=1.0.0    # Loads local .env configuration
 watchdog>=4.0.0         # Filesystem event monitoring for the auto file watcher
 requests>=2.31.0        # HTTP client for the Enterprise Brain network syncer
+
+# Dev / CI
+ruff>=0.4.0
