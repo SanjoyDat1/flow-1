@@ -11,6 +11,7 @@ import SwiftUI
 
 struct HardwareManagementSheet: View {
     @ObservedObject var bluetooth: BluetoothManager
+    var brainSyncer: EnterpriseBrainSyncer
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
@@ -24,10 +25,18 @@ struct HardwareManagementSheet: View {
     @State private var aggressiveBackgroundSync = false
     @State private var wifiOnlySync = true
     @State private var verifyState: VerifyState = .idle
+    @State private var brainTestState: BrainTestState = .idle
 
     private enum VerifyState: Equatable {
         case idle
         case verifying
+        case success
+        case failure(String)
+    }
+
+    private enum BrainTestState: Equatable {
+        case idle
+        case testing
         case success
         case failure(String)
     }
@@ -251,7 +260,7 @@ struct HardwareManagementSheet: View {
 
     private var enterpriseBrainSection: some View {
         Section {
-            TextField("https://your-brain-endpoint.com/api/v1/ingest/penlo-brain", text: $brainURL)
+            TextField("http://localhost:8000", text: $brainURL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
@@ -261,6 +270,35 @@ struct HardwareManagementSheet: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .foregroundStyle(Color.textPrimary)
+
+            Button {
+                testBrainConnection()
+            } label: {
+                HStack {
+                    Text(brainTestState == .testing ? "Testing…" : "Test Connection")
+                    if brainTestState == .testing {
+                        Spacer()
+                        ProgressView().tint(.royalBlue)
+                    }
+                }
+            }
+            .disabled(brainURL.trimmingCharacters(in: .whitespaces).isEmpty || brainKey.trimmingCharacters(in: .whitespaces).isEmpty || brainTestState == .testing)
+
+            if case .success = brainTestState {
+                Text("Connected — Brain accepted test payload.")
+                    .font(.caption)
+                    .foregroundStyle(Color.green)
+            }
+            if case .failure(let message) = brainTestState {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(Color.red)
+            }
+            if let authError = brainSyncer.authError {
+                Text(authError)
+                    .font(.caption)
+                    .foregroundStyle(Color.red)
+            }
 
             HStack {
                 Text("Status")
@@ -285,7 +323,7 @@ struct HardwareManagementSheet: View {
         } header: {
             Text("Enterprise Brain")
         } footer: {
-            Text("Connect to your Enterprise Brain for persistent knowledge graph sync. The endpoint and API key will be provided by your team admin.")
+            Text("Simulator: use http://localhost:8000. Physical iPhone: use your Mac IP (same Wi‑Fi), e.g. http://192.168.1.10:8000. Generate the pb_live_ key at localhost:5173/connect.")
         }
     }
 
@@ -364,8 +402,14 @@ struct HardwareManagementSheet: View {
             #endif
         }
 
-        // Save Enterprise Brain config
-        KeychainStore.saveBrainURL(brainURL.trimmingCharacters(in: .whitespacesAndNewlines))
+        // Save Enterprise Brain config (normalize URL to full ingest path)
+        let trimmedURL = brainURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalized = EnterpriseBrainSyncer.normalizedBrainURL(trimmedURL)?.absoluteString {
+            KeychainStore.saveBrainURL(normalized)
+            brainURL = normalized
+        } else {
+            KeychainStore.saveBrainURL(trimmedURL)
+        }
         KeychainStore.saveBrainKey(brainKey.trimmingCharacters(in: .whitespacesAndNewlines))
 
         // Save user email
@@ -388,6 +432,21 @@ struct HardwareManagementSheet: View {
                 Haptics.medium()
             } catch {
                 verifyState = .failure(error.localizedDescription)
+                Haptics.medium()
+            }
+        }
+    }
+
+    private func testBrainConnection() {
+        saveAPIKeyIfNeeded()
+        brainTestState = .testing
+        Task {
+            let result = await brainSyncer.testConnection()
+            if result.ok {
+                brainTestState = .success
+                Haptics.success()
+            } else {
+                brainTestState = .failure(result.detail)
                 Haptics.medium()
             }
         }
@@ -428,5 +487,5 @@ private struct ScanningRadar: View {
 }
 
 #Preview {
-    HardwareManagementSheet(bluetooth: BluetoothManager())
+    HardwareManagementSheet(bluetooth: BluetoothManager(), brainSyncer: EnterpriseBrainSyncer())
 }

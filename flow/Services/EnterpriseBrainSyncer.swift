@@ -159,24 +159,74 @@ final class EnterpriseBrainSyncer {
 
     // MARK: - Enqueue for Sync
 
+    /// Build incremental payload — only facts captured since last successful sync.
+    private func buildIncrementalPayload(from payload: PenloPayload) -> [String: Any]? {
+        guard let data = try? JSONEncoder().encode(payload),
+              var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+
+        if let lastSync = getLastSyncDate() {
+            if var facts = dict["facts"] as? [[String: Any]] {
+                facts = facts.filter { fact in
+                    guard let capturedStr = fact["capturedAt"] as? String,
+                          let captured = ISO8601DateFormatter().date(from: capturedStr) else {
+                        return true
+                    }
+                    return captured > lastSync
+                }
+                dict["facts"] = facts
+            }
+            if var vaultFiles = dict["vaultFiles"] as? [[String: Any]] {
+                vaultFiles = vaultFiles.filter { file in
+                    guard let modifiedStr = file["lastModified"] as? String,
+                          let modified = ISO8601DateFormatter().date(from: modifiedStr) else {
+                        return true
+                    }
+                    return modified > lastSync
+                }
+                dict["vaultFiles"] = vaultFiles
+            }
+        }
+
+        return dict
+    }
+
     /// Enqueue a transcript for sync. If the endpoint is configured, attempts
     /// immediate sync. On failure, buffers the payload in SyncQueue.
-    func enqueueAndSync(transcript: Transcript) async {
+    @discardableResult
+    func enqueueAndSync(transcript: Transcript) async -> SyncResult {
         let userEmail = KeychainStore.readUserEmail()
-        guard var payload = transcript.penloPayload else { return }
+        guard var payload = transcript.penloPayload else {
+            return SyncResult(ok: false, status: .clientError, detail: "No payload on transcript")
+        }
         payload.syncedAt = PenloTimestamp.now()
         payload.deviceID = PenloDevice.identifier
         payload.userEmail = userEmail
-        guard let data = try? JSONEncoder().encode(payload) else { return }
+        guard let data = try? JSONEncoder().encode(payload) else {
+            return SyncResult(ok: false, status: .clientError, detail: "Failed to encode payload")
+        }
 
         guard isConfigured else {
             await enqueueOffline(transcriptID: transcript.id, payloadData: data, error: "Not configured")
-            return
+            return SyncResult(ok: false, status: .notConfigured, detail: "Enterprise Brain URL or API key missing")
         }
 
-        var payloadDict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard var payloadDict = buildIncrementalPayload(from: payload) else {
+            return SyncResult(ok: false, status: .clientError, detail: "Failed to build sync payload")
+        }
         let syncTimestamp = PenloTimestamp.now()
         payloadDict["syncedAt"] = syncTimestamp
+        payloadDict["deviceID"] = PenloDevice.identifier
+        payloadDict["userEmail"] = userEmail
+
+        if let facts = payloadDict["facts"] as? [[String: Any]], facts.isEmpty,
+           getLastSyncDate() != nil {
+            try? await persistenceActor?.markSynced(transcriptID: transcript.id)
+            log("Skipped sync — no new facts since last sync")
+            return SyncResult(ok: true, status: .success, detail: "No new facts since last sync")
+        }
+
         let result = await syncWithBackoff(payloadDict: payloadDict)
 
         if result.ok {
@@ -189,8 +239,34 @@ final class EnterpriseBrainSyncer {
             if result.shouldRetry {
                 await enqueueOffline(transcriptID: transcript.id, payloadData: data, error: result.detail)
             }
-            log("Failed \(transcript.id.uuidString.prefix(8)): \(result.status.rawValue)")
+            log("Failed \(transcript.id.uuidString.prefix(8)): \(result.status.rawValue) — \(result.detail)")
         }
+        return result
+    }
+
+    /// Ping the configured Brain endpoint with a minimal payload.
+    func testConnection() async -> SyncResult {
+        guard isConfigured else {
+            return SyncResult(ok: false, status: .notConfigured, detail: "Enter URL and API key first")
+        }
+        let now = PenloTimestamp.now()
+        let payload: [String: Any] = [
+            "schemaVersion": "1.1",
+            "deviceID": PenloDevice.identifier,
+            "userEmail": KeychainStore.readUserEmail() as Any,
+            "syncedAt": now,
+            "facts": [[
+                "subject": "Penlo Flow",
+                "predicate": "connected to",
+                "object": "Enterprise Brain",
+                "confidence": 0.99,
+                "capturedAt": now,
+            ]],
+            "people": [],
+            "topicSummary": [],
+            "vaultFiles": [],
+        ]
+        return await syncWithBackoff(payloadDict: payload)
     }
 
     // MARK: - Queue Drain
@@ -284,10 +360,13 @@ final class EnterpriseBrainSyncer {
 
     private nonisolated func performSync(payloadDict: [String: Any]) async -> SyncResult {
         guard let urlString = KeychainStore.readBrainURL(),
-              let url = URL(string: urlString),
-              let apiKey = KeychainStore.readBrainKey() else {
+              let url = Self.normalizedBrainURL(urlString),
+              let apiKey = KeychainStore.readBrainKey()?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !apiKey.isEmpty else {
             return SyncResult(ok: false, status: .notConfigured, detail: "Missing endpoint or key")
         }
+
+        let sanitized = Self.sanitizePayload(payloadDict)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -296,7 +375,7 @@ final class EnterpriseBrainSyncer {
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = Self.httpTimeout
 
-        guard let body = try? JSONSerialization.data(withJSONObject: payloadDict) else {
+        guard let body = try? JSONSerialization.data(withJSONObject: sanitized) else {
             return SyncResult(ok: false, status: .networkError, detail: "Failed to serialize payload")
         }
         request.httpBody = body
@@ -318,7 +397,7 @@ final class EnterpriseBrainSyncer {
         let responseBody = String(data: data.prefix(500), encoding: .utf8) ?? ""
 
         switch http.statusCode {
-        case 200:
+        case 200...299:
             return SyncResult(ok: true, status: .success, detail: "Backend accepted payload")
         case 400:
             return SyncResult(ok: false, status: .clientError, detail: "HTTP 400: \(responseBody)")
@@ -333,6 +412,43 @@ final class EnterpriseBrainSyncer {
         default:
             return SyncResult(ok: false, status: .serverError, detail: "HTTP \(http.statusCode): \(responseBody)", shouldRetry: true)
         }
+    }
+
+    /// Ensure legacy facts with empty capturedAt still validate on the backend.
+    private nonisolated static func sanitizePayload(_ dict: [String: Any]) -> [String: Any] {
+        var out = dict
+        let fallback = (out["syncedAt"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? PenloTimestamp.now()
+        if var facts = out["facts"] as? [[String: Any]] {
+            facts = facts.map { fact in
+                var row = fact
+                let captured = row["capturedAt"] as? String
+                if captured == nil || captured?.isEmpty == true {
+                    row["capturedAt"] = fallback
+                }
+                return row
+            }
+            out["facts"] = facts
+        }
+        return out
+    }
+
+    /// Accept base URL or full ingest path; trim whitespace.
+    nonisolated static func normalizedBrainURL(_ raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        var urlString = trimmed
+        if urlString.contains("/api/v1/ingest/penlo-brain") {
+            return URL(string: urlString)
+        }
+
+        urlString = urlString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if urlString.hasSuffix("/api/v1/ingest") {
+            urlString += "/penlo-brain"
+        } else {
+            urlString += "/api/v1/ingest/penlo-brain"
+        }
+        return URL(string: urlString)
     }
 
     // MARK: - Error Handling

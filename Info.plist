@@ -16,5 +16,18 @@
 	<string>Penlo uses the microphone to listen and transcribe your conversations so it can extract key facts, people, and decisions for your knowledge graph.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Penlo uses on-device speech recognition to convert your spoken words into text efficiently without sending audio to the cloud.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>

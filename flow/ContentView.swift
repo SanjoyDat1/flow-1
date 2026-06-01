@@ -94,7 +94,7 @@ struct ContentView: View {
         .animation(Self.drawerSpring, value: drawerOpen)
         .animation(Self.drawerSpring, value: dragOffset)
         .sheet(isPresented: $showSettings) {
-            HardwareManagementSheet(bluetooth: bluetooth)
+            HardwareManagementSheet(bluetooth: bluetooth, brainSyncer: brainSyncer)
         }
         .sheet(item: $selectedFolder) { folder in
             KnowledgeVaultSheet(folder: folder)

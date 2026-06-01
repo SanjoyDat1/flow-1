@@ -15,8 +15,8 @@ from pathlib import Path
 
 import requests as real_requests
 
+from pipeline import Config
 import pipeline as P
-from pipeline import Config, SyncResult
 
 FAILURES: list[str] = []
 

@@ -26,6 +26,7 @@ struct StagingVaultSheet: View {
     @State private var expandedID: UUID?
     @State private var syncingAll = false
     @State private var syncingID: UUID?
+    @State private var syncError: String?
 
     var body: some View {
         NavigationStack {
@@ -58,6 +59,14 @@ struct StagingVaultSheet: View {
         }
         .preferredColorScheme(.dark)
         .onAppear { purgeExpired() }
+        .alert("Sync Failed", isPresented: Binding(
+            get: { syncError != nil },
+            set: { if !$0 { syncError = nil } }
+        )) {
+            Button("OK", role: .cancel) { syncError = nil }
+        } message: {
+            Text(syncError ?? "Could not reach Enterprise Brain.")
+        }
         .onChange(of: blocks.count) { old, new in
             if new == 0 && old > 0 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
@@ -207,14 +216,22 @@ struct StagingVaultSheet: View {
     private func syncBlock(_ transcript: Transcript) {
         syncingID = transcript.id
         Task {
-            if brainSyncer.isConfigured {
-                await brainSyncer.enqueueAndSync(transcript: transcript)
+            defer { syncingID = nil }
+            guard brainSyncer.isConfigured else {
+                syncError = "Configure Enterprise Brain URL and API key in Settings first."
+                Haptics.medium()
+                return
             }
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-                transcript.isSynced = true
-                try? modelContext.save()
-                syncingID = nil
-                Haptics.success()
+            let result = await brainSyncer.enqueueAndSync(transcript: transcript)
+            if result.ok {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+                    transcript.isSynced = true
+                    try? modelContext.save()
+                    Haptics.success()
+                }
+            } else {
+                syncError = result.detail
+                Haptics.medium()
             }
         }
     }
@@ -222,16 +239,29 @@ struct StagingVaultSheet: View {
     private func syncAllBlocks() {
         syncingAll = true
         Task {
+            defer { syncingAll = false }
+            guard brainSyncer.isConfigured else {
+                syncError = "Configure Enterprise Brain URL and API key in Settings first."
+                Haptics.medium()
+                return
+            }
+            var failures: [String] = []
             for block in blocks {
-                if brainSyncer.isConfigured {
-                    await brainSyncer.enqueueAndSync(transcript: block)
+                let result = await brainSyncer.enqueueAndSync(transcript: block)
+                if result.ok {
+                    block.isSynced = true
+                } else {
+                    failures.append(result.detail)
                 }
-                block.isSynced = true
             }
             try? modelContext.save()
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-                syncingAll = false
-                Haptics.success()
+            if failures.isEmpty {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+                    Haptics.success()
+                }
+            } else {
+                syncError = failures.first ?? "Some memories failed to sync."
+                Haptics.medium()
             }
         }
     }
