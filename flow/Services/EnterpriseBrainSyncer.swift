@@ -31,6 +31,7 @@ extension KeychainStore {
         guard !url.isEmpty else { return }
         var add = query
         add[kSecValueData as String] = url.data(using: .utf8)!
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
     }
 
@@ -62,6 +63,7 @@ extension KeychainStore {
         guard !key.isEmpty else { return }
         var add = query
         add[kSecValueData as String] = key.data(using: .utf8)!
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
     }
 
