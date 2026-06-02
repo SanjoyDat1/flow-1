@@ -34,9 +34,17 @@ struct DispatchView: View {
     private var cardList: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
+                if let err = service.lastActionError {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Metrics.screenPadding)
+                }
                 ForEach(service.cards) { card in
                     DispatchCardView(
                         card: card,
+                        showAutoBuild: service.executorEnabled,
                         onApprove: { mode in
                             Task { await service.approve(id: card.id, mode: mode) }
                         },

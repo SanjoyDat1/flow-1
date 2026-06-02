@@ -45,7 +45,6 @@ final class BriefingScheduler {
 
     /// Checks for events within the next 20 minutes and generates briefings.
     private func checkAndBrief() async {
-        guard ClaudeService.hasAPIKey else { return }
         guard let chatVM, let modelContext else { return }
 
         let events = calendar.upcomingEvents()
@@ -60,6 +59,31 @@ final class BriefingScheduler {
             briefedEventIDs.insert(eventID)
 
             let title = event.title ?? "Upcoming Meeting"
+            let attendees = attendeeNames(for: event)
+            let topics = title.split(separator: " ").map(String.init).filter { $0.count > 2 }
+
+            if let brainBriefing = await BriefingService.fetchBriefing(
+                meetingTitle: title,
+                attendees: attendees.isEmpty ? [title] : attendees,
+                topics: topics,
+                eventAt: event.startDate,
+                minutesUntil: minutesUntil
+            ) {
+                chatVM.injectBriefing(brainBriefing)
+                continue
+            }
+
+            guard ClaudeService.hasAPIKey else {
+                chatVM.injectBriefing(Briefing(
+                    meetingTitle: title,
+                    minutesUntil: minutesUntil,
+                    peopleContext: [],
+                    relevantDecisions: [],
+                    openQuestions: []
+                ))
+                continue
+            }
+
             let context = buildTranscriptContext(from: modelContext)
 
             do {
@@ -73,18 +97,22 @@ final class BriefingScheduler {
                 #if DEBUG
                 print("[Penlo Briefing] Generation failed: \(error.localizedDescription)")
                 #endif
-                let fallback = Briefing(
+                chatVM.injectBriefing(Briefing(
                     meetingTitle: title,
                     minutesUntil: minutesUntil,
                     peopleContext: [],
                     relevantDecisions: [],
                     openQuestions: []
-                )
-                chatVM.injectBriefing(fallback)
+                ))
             }
         }
 
         await notifications.refreshNotifications(for: events)
+    }
+
+    private func attendeeNames(for event: EKEvent) -> [String] {
+        guard let attendees = event.attendees else { return [] }
+        return attendees.compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
     private func schedulePeriodicCheck() async {

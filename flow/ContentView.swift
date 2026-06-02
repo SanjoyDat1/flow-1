@@ -7,6 +7,7 @@
 //  ChatViewModel, and AudioEngineManager.
 //
 
+import Combine
 import SwiftData
 import SwiftUI
 import UIKit
