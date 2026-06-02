@@ -8,6 +8,7 @@
 
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct HardwareManagementSheet: View {
     @ObservedObject var bluetooth: BluetoothManager
@@ -47,6 +48,7 @@ struct HardwareManagementSheet: View {
                 authSection
                 accountSection
                 enterpriseBrainSection
+                notificationsSection
                 queueSection
             }
             .scrollContentBackground(.hidden)
@@ -321,6 +323,23 @@ struct HardwareManagementSheet: View {
             Text("Enterprise Brain")
         } footer: {
             Text("Simulator: use http://localhost:8000. Physical iPhone: use your Mac IP (same Wi‑Fi), e.g. http://192.168.1.10:8000. Generate the pb_live_ key at localhost:5173/connect.")
+        }
+    }
+
+    // MARK: Notifications
+
+    private var notificationsSection: some View {
+        Section {
+            Text("Local alerts fire for new dispatches, sync failures, and meeting briefings when Penlo is in the background.")
+                .font(.caption)
+                .foregroundStyle(Color.textSecondary)
+            Button("Open notification permissions") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+        } header: {
+            Text("Notifications")
         }
     }
 

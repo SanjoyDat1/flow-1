@@ -27,6 +27,8 @@ final class DispatchService: ObservableObject {
 
     private var pollingTask: Task<Void, Never>?
     private var capabilitiesLoaded = false
+    private var lastPendingCount = 0
+    private var lastStatuses: [UUID: String] = [:]
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -118,8 +120,12 @@ final class DispatchService: ObservableObject {
             guard (200...299).contains(http.statusCode) else { return }
             authError = nil
             let fetched = try decoder.decode([DispatchCard].self, from: data)
+            let newPending = fetched.filter { $0.status == "pending" }.count
+            detectDispatchChanges(fetched: fetched, newPending: newPending)
             cards = fetched
-            pendingCount = fetched.filter { $0.status == "pending" }.count
+            pendingCount = newPending
+            lastPendingCount = newPending
+            lastStatuses = Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0.status) })
         } catch {
             // Network/decode errors are silent during background polling so the
             // UI doesn't flicker on transient connectivity loss.
@@ -192,5 +198,21 @@ final class DispatchService: ObservableObject {
     func stopPolling() {
         pollingTask?.cancel()
         pollingTask = nil
+    }
+
+    private func detectDispatchChanges(fetched: [DispatchCard], newPending: Int) {
+        if newPending > lastPendingCount {
+            let label = fetched.first(where: { $0.status == "pending" })?.featureLabel
+            NotificationManager.shared.notifyDispatchPending(count: newPending, featureLabel: label)
+        }
+        for card in fetched {
+            let prev = lastStatuses[card.id]
+            guard let prev, prev != card.status else { continue }
+            if card.status == "completed" {
+                NotificationManager.shared.notifyDispatchComplete(featureLabel: card.featureLabel, prURL: card.prUrl)
+            } else if card.status == "failed" {
+                NotificationManager.shared.notifyDispatchFailed(featureLabel: card.featureLabel, error: card.error ?? "Build failed")
+            }
+        }
     }
 }

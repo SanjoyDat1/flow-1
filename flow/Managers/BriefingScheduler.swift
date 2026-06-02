@@ -15,7 +15,6 @@ import SwiftUI
 final class BriefingScheduler {
 
     private let calendar = CalendarManager()
-    private let notifications = NotificationManager()
 
     private var chatVM: ChatViewModel?
     private var modelContext: ModelContext?
@@ -32,7 +31,7 @@ final class BriefingScheduler {
         checkTask?.cancel()
         checkTask = Task {
             _ = await calendar.requestAccess()
-            _ = await notifications.requestAuthorization()
+            _ = await NotificationManager.shared.requestAuthorization()
             await checkAndBrief()
             await schedulePeriodicCheck()
         }
@@ -69,6 +68,10 @@ final class BriefingScheduler {
                 eventAt: event.startDate,
                 minutesUntil: minutesUntil
             ) {
+                NotificationManager.shared.cacheBriefingSummary(
+                    eventID: eventID,
+                    summary: brainBriefing.summaryLine
+                )
                 chatVM.injectBriefing(brainBriefing)
                 continue
             }
@@ -107,7 +110,7 @@ final class BriefingScheduler {
             }
         }
 
-        await notifications.refreshNotifications(for: events)
+        await NotificationManager.shared.refreshNotifications(for: events)
     }
 
     private func attendeeNames(for event: EKEvent) -> [String] {

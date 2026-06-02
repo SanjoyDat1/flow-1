@@ -119,6 +119,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openDispatch)) { _ in
             showDispatches = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+            showSettings = true
+        }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
             // DispatchView polls at 5s while open; only top up the badge here
             // when the sheet is closed.
@@ -215,12 +218,6 @@ struct ContentView: View {
     }
 }
 
-// Defined locally for now. Sanjoy's `feat/apns-push` PR also declares this name
-// in `AppDelegate.swift`; the duplicate resolves to a single definition once both
-// PRs merge (`Notification.Name` values are compared by their raw string).
-extension Notification.Name {
-    static let openDispatch = Notification.Name("com.getflow.flow.openDispatch")
-}
 
 #Preview("Dark") {
     ContentView()
