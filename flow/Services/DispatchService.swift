@@ -24,6 +24,7 @@ final class DispatchService: ObservableObject {
     @Published var authError: String? = nil
     @Published var lastActionError: String? = nil
     @Published var executorEnabled = false
+    @Published var highlightDispatchId: String?
 
     private var pollingTask: Task<Void, Never>?
     private var capabilitiesLoaded = false
@@ -202,8 +203,12 @@ final class DispatchService: ObservableObject {
 
     private func detectDispatchChanges(fetched: [DispatchCard], newPending: Int) {
         if newPending > lastPendingCount {
-            let label = fetched.first(where: { $0.status == "pending" })?.featureLabel
-            NotificationManager.shared.notifyDispatchPending(count: newPending, featureLabel: label)
+            let pending = fetched.first(where: { $0.status == "pending" })
+            NotificationManager.shared.notifyDispatchPending(
+                count: newPending,
+                featureLabel: pending?.featureLabel,
+                dispatchId: pending?.id.uuidString.lowercased()
+            )
         }
         for card in fetched {
             let prev = lastStatuses[card.id]

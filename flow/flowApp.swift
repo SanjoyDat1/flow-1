@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 @main
 struct flowApp: App {
@@ -17,6 +18,11 @@ struct flowApp: App {
             ContentView()
                 .modelContainer(modelContainer)
                 .task { await requestPermissionsOnce() }
+                .onReceive(NotificationCenter.default.publisher(for: .apnsTokenReceived)) { note in
+                    if let token = note.userInfo?["token"] as? String {
+                        Task { await PushRegistrationService.registerTokenWithBrain(token) }
+                    }
+                }
                 .onReceive(
                     NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
                 ) { _ in
@@ -27,7 +33,12 @@ struct flowApp: App {
 
     private func requestPermissionsOnce() async {
         _ = await calendarManager.requestAccess()
-        _ = await NotificationManager.shared.requestAuthorization()
+        let granted = await NotificationManager.shared.requestAuthorization()
+        if granted {
+            await MainActor.run {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
         await refreshBriefingNotifications()
     }
 

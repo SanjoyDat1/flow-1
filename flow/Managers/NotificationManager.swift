@@ -91,15 +91,20 @@ final class NotificationManager {
 
     // MARK: - Immediate local alerts
 
-    func notifyDispatchPending(count: Int, featureLabel: String?) {
+    func notifyDispatchPending(count: Int, featureLabel: String?, dispatchId: String? = nil) {
+        guard !UserDefaults.standard.bool(forKey: "com.getflow.flow.remotePushRegistered") else { return }
         guard UIApplication.shared.applicationState != .active else { return }
         let body = featureLabel.map { "\($0) — approve or queue" } ?? "\(count) dispatch\(count == 1 ? "" : "es") awaiting approval"
+        var userInfo: [String: Any] = ["route": "dispatch"]
+        if let dispatchId {
+            userInfo["dispatch_id"] = dispatchId
+        }
         postImmediate(
             id: "dispatch.pending.\(Date().timeIntervalSince1970)",
             title: "New dispatch",
             body: body,
             category: Category.dispatch,
-            userInfo: ["route": "dispatch"]
+            userInfo: userInfo
         )
     }
 

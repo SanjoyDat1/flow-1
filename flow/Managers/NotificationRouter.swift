@@ -2,8 +2,6 @@
 //  NotificationRouter.swift
 //  flow
 //
-//  Routes notification taps to in-app destinations via NotificationCenter.
-//
 
 import Foundation
 import UserNotifications
@@ -12,12 +10,22 @@ extension Notification.Name {
     static let openDispatch = Notification.Name("com.getflow.flow.openDispatch")
     static let openBriefing = Notification.Name("com.getflow.flow.openBriefing")
     static let openSettings = Notification.Name("com.getflow.flow.openSettings")
+    static let brainCredentialsSaved = Notification.Name("com.getflow.flow.brainCredentialsSaved")
 }
 
 enum NotificationRouter {
     static func handle(response: UNNotificationResponse) {
         let userInfo = response.notification.request.content.userInfo
         let category = response.notification.request.content.categoryIdentifier
+
+        if let dispatchId = userInfo["dispatch_id"] as? String {
+            NotificationCenter.default.post(
+                name: .openDispatch,
+                object: nil,
+                userInfo: ["dispatch_id": dispatchId]
+            )
+            return
+        }
 
         switch category {
         case NotificationManager.Category.dispatch:
@@ -35,6 +43,8 @@ enum NotificationRouter {
 }
 
 final class PenloNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = PenloNotificationDelegate()
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification

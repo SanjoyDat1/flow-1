@@ -417,6 +417,8 @@ struct HardwareManagementSheet: View {
         }
         KeychainStore.saveBrainKey(brainKey.trimmingCharacters(in: .whitespacesAndNewlines))
 
+        NotificationCenter.default.post(name: .brainCredentialsSaved, object: nil)
+
         // Save user email
         KeychainStore.saveUserEmail(userEmail.trimmingCharacters(in: .whitespacesAndNewlines))
     }

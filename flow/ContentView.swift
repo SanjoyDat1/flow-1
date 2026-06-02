@@ -116,11 +116,25 @@ struct ContentView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openDispatch)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .openDispatch)) { note in
             showDispatches = true
+            if let id = note.userInfo?["dispatch_id"] as? String {
+                dispatchService.highlightDispatchId = id.lowercased()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openBriefing)) { _ in
+            briefingScheduler.start()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             showSettings = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .brainCredentialsSaved)) { _ in
+            Task {
+                await PushRegistrationService.registerCachedTokenIfPossible()
+                await MainActor.run {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
             // DispatchView polls at 5s while open; only top up the badge here
