@@ -152,6 +152,12 @@ struct ContentView: View {
             audioEngine.onTranscribingChange = { [appState] isActive in
                 appState.handleTranscribingChange(isActive)
             }
+            bluetooth.onHardwareAudio = { [audioEngine] data in
+                audioEngine.appendHardwareAudio(data: data)
+            }
+            bluetooth.onHardwareAction = { [audioEngine] in
+                audioEngine.injectHardwareActionFlag()
+            }
             chatVM.modelContext = modelContext
             briefingScheduler.configure(chatVM: chatVM, modelContext: modelContext)
             briefingScheduler.start()

@@ -157,7 +157,7 @@ final class NotificationManager {
         title: String,
         body: String,
         category: String,
-        userInfo: [String: String]
+        userInfo: [String: Any]
     ) {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -168,9 +168,15 @@ final class NotificationManager {
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             if let error {
-                self.log("Immediate notification failed: \(error.localizedDescription)")
+                Task { @MainActor in
+                    NotificationManager.shared.logImmediateFailure(error.localizedDescription)
+                }
             }
         }
+    }
+
+    fileprivate func logImmediateFailure(_ message: String) {
+        log(message)
     }
 
     private func log(_ message: String) {
