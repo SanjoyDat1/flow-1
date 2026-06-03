@@ -11,6 +11,7 @@ extension Notification.Name {
     static let openBriefing = Notification.Name("com.getflow.flow.openBriefing")
     static let openSettings = Notification.Name("com.getflow.flow.openSettings")
     static let brainCredentialsSaved = Notification.Name("com.getflow.flow.brainCredentialsSaved")
+    static let reopenOnboarding = Notification.Name("com.getflow.flow.reopenOnboarding")
 }
 
 enum NotificationRouter {

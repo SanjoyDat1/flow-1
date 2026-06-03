@@ -78,11 +78,23 @@ final class AudioEngineManager {
         label: "com.getflow.flow.ble-audio",
         qos: .userInitiated
     )
-    private nonisolated(unsafe) var activeRecognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private nonisolated(unsafe) var _activeRecognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+
+    /// Tracks pending audio buffers to drop frames under memory pressure.
+    private static let maxPendingBuffers = 200
+    private nonisolated(unsafe) var _pendingBufferCount: Int = 0
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var speechRecognizer: SFSpeechRecognizer?
     private var inputTapInstalled = false
+
+    /// Thread-safe setter for the shared recognition request.
+    /// Must be called to set/nil the request so that audio queues observe it safely.
+    private func setActiveRequest(_ request: SFSpeechAudioBufferRecognitionRequest?) {
+        hardwareAudioQueue.sync {
+            _activeRecognitionRequest = request
+        }
+    }
 
     // MARK: - Private Segmentation
 
@@ -135,11 +147,9 @@ final class AudioEngineManager {
 
         if !micGranted {
             log("Microphone permission denied")
-            onFault?("Microphone permission denied. Penlo cannot transcribe without audio access.")
         }
         if !speechGranted {
             log("Speech recognition permission denied (status: \(speechStatus.rawValue))")
-            onFault?("Speech recognition permission denied.")
         }
 
         return micGranted && speechGranted
@@ -155,7 +165,6 @@ final class AudioEngineManager {
         let speechGranted = (speechStatus == .authorized)
         if !speechGranted {
             log("Speech recognition permission denied (status: \(speechStatus.rawValue))")
-            onFault?("Speech recognition permission denied.")
         }
         return speechGranted
     }
@@ -207,8 +216,16 @@ final class AudioEngineManager {
     /// Append raw 16-bit PCM (16 kHz mono) from the wearable into the STT pipeline.
     nonisolated func appendHardwareAudio(data: Data) {
         hardwareAudioQueue.async {
-            guard let buffer = Self.convertToPCMBuffer(data: data) else { return }
-            self.activeRecognitionRequest?.append(buffer)
+            if self._pendingBufferCount >= Self.maxPendingBuffers {
+                return
+            }
+            self._pendingBufferCount += 1
+            guard let buffer = Self.convertToPCMBuffer(data: data) else {
+                self._pendingBufferCount -= 1
+                return
+            }
+            self._activeRecognitionRequest?.append(buffer)
+            self._pendingBufferCount -= 1
         }
     }
 
@@ -240,7 +257,9 @@ final class AudioEngineManager {
 
     /// For development/simulators: feed a pre-built buffer into the recognition pipeline.
     func feedAudioBuffer(_ buffer: AVAudioPCMBuffer) {
-        activeRecognitionRequest?.append(buffer)
+        hardwareAudioQueue.async { [weak self] in
+            self?._activeRecognitionRequest?.append(buffer)
+        }
         recognitionRequest?.append(buffer)
     }
 
@@ -263,7 +282,10 @@ final class AudioEngineManager {
         let format = inputNode.outputFormat(forBus: 0)
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.activeRecognitionRequest?.append(buffer)
+            guard let self else { return }
+            self.hardwareAudioQueue.async {
+                self._activeRecognitionRequest?.append(buffer)
+            }
         }
         inputTapInstalled = true
 
@@ -279,7 +301,7 @@ final class AudioEngineManager {
         request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
 
         recognitionRequest = request
-        activeRecognitionRequest = request
+        setActiveRequest(request)
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor [weak self] in
@@ -292,12 +314,16 @@ final class AudioEngineManager {
 
                 if let error {
                     let nsError = error as NSError
-                    // Code 1101 = "no speech detected", not a real fault.
-                    if nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 1101 {
-                        self.log("No speech detected — restarting listener")
-                        self.restartPipeline()
-                    } else if nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 216 {
-                        // Task cancelled — expected during cleanup.
+                    // Benign Apple speech errors — restart or ignore instead of faulting the whole app.
+                    let benignCodes: Set<Int> = [1101, 216, 1110, 1700, 1701]
+                    if nsError.domain == "kAFAssistantErrorDomain", benignCodes.contains(nsError.code) {
+                        if nsError.code == 1101 {
+                            self.log("No speech detected — restarting listener")
+                            self.restartPipeline()
+                        }
+                    } else if error.localizedDescription.localizedCaseInsensitiveContains("canceled")
+                                || error.localizedDescription.localizedCaseInsensitiveContains("cancelled") {
+                        // Expected during cleanup.
                     } else {
                         self.log("Recognition error: \(error.localizedDescription)")
                         self.onFault?(error.localizedDescription)
@@ -404,7 +430,7 @@ final class AudioEngineManager {
         recognitionTask = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
-        activeRecognitionRequest = nil
+        setActiveRequest(nil)
 
         guard let recognizer = speechRecognizer, recognizer.isAvailable, isTranscribing else { return }
 
@@ -412,7 +438,7 @@ final class AudioEngineManager {
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
         recognitionRequest = request
-        activeRecognitionRequest = request
+        setActiveRequest(request)
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor [weak self] in
@@ -422,9 +448,14 @@ final class AudioEngineManager {
                 }
                 if let error {
                     let nsError = error as NSError
-                    if nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 1101 {
-                        self.restartPipeline()
-                    } else if !(nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 216) {
+                    let benignCodes: Set<Int> = [1101, 216, 1110, 1700, 1701]
+                    if nsError.domain == "kAFAssistantErrorDomain", benignCodes.contains(nsError.code) {
+                        if nsError.code == 1101 {
+                            self.restartPipeline()
+                        }
+                    } else if error.localizedDescription.localizedCaseInsensitiveContains("canceled")
+                                || error.localizedDescription.localizedCaseInsensitiveContains("cancelled") {
+                    } else {
                         self.log("Recognition error on restart: \(error.localizedDescription)")
                         self.onFault?(error.localizedDescription)
                         self.cleanUp()
@@ -446,7 +477,7 @@ final class AudioEngineManager {
         recognitionTask = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
-        activeRecognitionRequest = nil
+        setActiveRequest(nil)
 
         if inputTapInstalled {
             audioEngine.inputNode.removeTap(onBus: 0)

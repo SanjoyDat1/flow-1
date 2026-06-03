@@ -27,7 +27,16 @@ struct ContentView: View {
     @State private var dragOffset: CGFloat = 0
     @State private var showSettings = false
     @State private var selectedFolder: VaultFolder?
-    @State private var showDispatches = false
+    @State private var showAllCategories = false
+    private var graphService = BrainGraphService.shared
+    private enum RootScreen {
+        case chat
+        case dispatches
+    }
+
+    @State private var rootScreen: RootScreen = .chat
+    @State private var showOnboarding = !SetupState.isOnboardingComplete
+    @State private var onboardingCoordinator = OnboardingCoordinator()
 
     private let openWidth: CGFloat = Metrics.drawerWidth
 
@@ -56,10 +65,17 @@ struct ContentView: View {
             DrawerMenu(
                 bluetooth: bluetooth,
                 chatVM: chatVM,
+                graphService: graphService,
                 onFolderTap: { folder in
                     closeDrawer()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         selectedFolder = folder
+                    }
+                },
+                onAllCategoriesTap: {
+                    closeDrawer()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        showAllCategories = true
                     }
                 },
                 onSettingsTap: {
@@ -77,10 +93,7 @@ struct ContentView: View {
                     closeDrawer()
                 },
                 onDispatchTap: {
-                    closeDrawer()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        showDispatches = true
-                    }
+                    openDispatches()
                 },
                 dispatchBadge: dispatchService.pendingCount
             )
@@ -103,21 +116,51 @@ struct ContentView: View {
         .ignoresSafeArea(.keyboard)
         .animation(Self.drawerSpring, value: drawerOpen)
         .animation(Self.drawerSpring, value: dragOffset)
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingFlowView(
+                coordinator: onboardingCoordinator,
+                brainSyncer: brainSyncer,
+                onFinished: {
+                    showOnboarding = false
+                    onboardingCoordinator.isReplayFromSettings = false
+                }
+            )
+        }
         .sheet(isPresented: $showSettings) {
-            HardwareManagementSheet(bluetooth: bluetooth, brainSyncer: brainSyncer)
+            HardwareManagementSheet(
+                bluetooth: bluetooth,
+                brainSyncer: brainSyncer,
+                onSetupGuide: { presentSetupGuide() }
+            )
+        }
+        .onOpenURL { url in
+            onboardingCoordinator.applyDeepLink(url)
+            if !SetupState.isOnboardingComplete {
+                showOnboarding = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .reopenOnboarding)) { _ in
+            presentSetupGuide()
         }
         .sheet(item: $selectedFolder) { folder in
-            KnowledgeVaultSheet(folder: folder)
+            KnowledgeVaultSheet(folder: folder, graphService: graphService)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showDispatches) {
-            DispatchView(service: dispatchService)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showAllCategories) {
+            BrainCategoriesSheet(graphService: graphService) { folder in
+                selectedFolder = folder
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+        ) { _ in
+            Task { await graphService.refresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openDispatch)) { note in
-            showDispatches = true
+            openDispatches()
             if let id = note.userInfo?["dispatch_id"] as? String {
                 dispatchService.highlightDispatchId = id.lowercased()
             }
@@ -137,10 +180,8 @@ struct ContentView: View {
             }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
-            // DispatchView polls at 5s while open; only top up the badge here
-            // when the sheet is closed.
-            guard !showDispatches else { return }
-            Task { await dispatchService.fetchCards() }
+            guard rootScreen != .dispatches else { return }
+            Task { await dispatchService.fetchCards(silent: true) }
         }
         .onAppear {
             bluetooth.onStateChange = { [appState] wearableState in
@@ -151,6 +192,9 @@ struct ContentView: View {
             )
             audioEngine.onTranscribingChange = { [appState] isActive in
                 appState.handleTranscribingChange(isActive)
+            }
+            audioEngine.onFault = { [appState] message in
+                appState.enterFault(message: message)
             }
             bluetooth.onHardwareAudio = { [audioEngine] data in
                 audioEngine.appendHardwareAudio(data: data)
@@ -163,7 +207,6 @@ struct ContentView: View {
             briefingScheduler.start()
             brainSyncer.configure(modelContainer: modelContext.container)
             brainSyncer.drainQueue(modelContext: modelContext)
-            PenloStore.seedDemoTranscripts(in: modelContext)
             Task { await dispatchService.fetchCards() }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -174,17 +217,55 @@ struct ContentView: View {
     // MARK: Main Content
 
     private var mainContent: some View {
-        HomeChatView(
-            bluetooth: bluetooth,
-            chatVM: chatVM,
-            audioEngine: audioEngine,
-            brainSyncer: brainSyncer,
-            onMenuTap: { toggleDrawer() },
-            onNewChat: {
-                chatVM.startNewChat()
-                if drawerOpen { closeDrawer() }
+        Group {
+            switch rootScreen {
+            case .chat:
+                HomeChatView(
+                    bluetooth: bluetooth,
+                    chatVM: chatVM,
+                    audioEngine: audioEngine,
+                    brainSyncer: brainSyncer,
+                    appStateManager: appState,
+                    onMenuTap: { toggleDrawer() },
+                    onNewChat: {
+                        chatVM.startNewChat()
+                        if drawerOpen { closeDrawer() }
+                    },
+                    onSetupGuide: { presentSetupGuide() }
+                )
+            case .dispatches:
+                DispatchView(
+                    service: dispatchService,
+                    onBack: { closeDispatches() },
+                    onOpenSettings: {
+                        showSettings = true
+                    }
+                )
             }
-        )
+        }
+    }
+
+    private func openDispatches() {
+        closeDrawer()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                rootScreen = .dispatches
+            }
+        }
+    }
+
+    private func closeDispatches() {
+        dispatchService.stopPolling()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            rootScreen = .chat
+        }
+    }
+
+    private func presentSetupGuide() {
+        onboardingCoordinator.isReplayFromSettings = true
+        onboardingCoordinator.stepIndex = 0
+        onboardingCoordinator.rebuildSteps()
+        showOnboarding = true
     }
 
     // MARK: Drawer Control

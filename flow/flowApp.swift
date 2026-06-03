@@ -18,7 +18,6 @@ struct flowApp: App {
         WindowGroup {
             ContentView()
                 .modelContainer(modelContainer)
-                .task { await requestPermissionsOnce() }
                 .onReceive(NotificationCenter.default.publisher(for: .apnsTokenReceived)) { note in
                     if let token = note.userInfo?["token"] as? String {
                         Task { await PushRegistrationService.registerTokenWithBrain(token) }
@@ -27,24 +26,14 @@ struct flowApp: App {
                 .onReceive(
                     NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
                 ) { _ in
-                    Task { await refreshBriefingNotifications() }
+                    Task { await Self.refreshBriefingNotificationsIfAllowed(calendarManager: calendarManager) }
                 }
         }
     }
 
-    private func requestPermissionsOnce() async {
-        _ = await calendarManager.requestAccess()
-        let granted = await NotificationManager.shared.requestAuthorization()
-        if granted {
-            await MainActor.run {
-                UIApplication.shared.registerForRemoteNotifications()
-            }
-        }
-        await refreshBriefingNotifications()
-    }
-
     @Sendable
-    private func refreshBriefingNotifications() async {
+    private static func refreshBriefingNotificationsIfAllowed(calendarManager: CalendarManager) async {
+        guard SetupState.briefingsOptIn else { return }
         let events = await MainActor.run { calendarManager.upcomingEvents() }
         await NotificationManager.shared.refreshNotifications(for: events)
     }

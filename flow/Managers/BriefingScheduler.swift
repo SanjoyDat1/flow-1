@@ -26,12 +26,14 @@ final class BriefingScheduler {
         self.modelContext = modelContext
     }
 
-    /// Call on app foreground or after setup. Requests permissions then checks.
+    /// Call on app foreground or after setup. Only prompts for calendar/notifications when user opted in during onboarding.
     func start() {
         checkTask?.cancel()
         checkTask = Task {
-            _ = await calendar.requestAccess()
-            _ = await NotificationManager.shared.requestAuthorization()
+            if SetupState.briefingsOptIn {
+                _ = await calendar.requestAccess()
+                _ = await NotificationManager.shared.requestAuthorization()
+            }
             await checkAndBrief()
             await schedulePeriodicCheck()
         }

@@ -13,6 +13,7 @@ import UIKit
 struct HardwareManagementSheet: View {
     @ObservedObject var bluetooth: BluetoothManager
     var brainSyncer: EnterpriseBrainSyncer
+    var onSetupGuide: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
@@ -43,6 +44,25 @@ struct HardwareManagementSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let onSetupGuide {
+                    Section {
+                        Button {
+                            dismiss()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                onSetupGuide()
+                            }
+                        } label: {
+                            HStack {
+                                Text("Setup guide")
+                                    .foregroundStyle(Color.textPrimary)
+                                Spacer()
+                                Image(systemName: "arrow.right.circle")
+                                    .foregroundStyle(Color.royalBlue)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
                 connectionSection
                 phoneMicSection
                 authSection
@@ -70,6 +90,11 @@ struct HardwareManagementSheet: View {
                 brainURL = KeychainStore.readBrainURL() ?? ""
                 brainKey = KeychainStore.readBrainKey() ?? ""
                 userEmail = KeychainStore.readUserEmail() ?? ""
+                #if DEBUG
+                if brainURL.isEmpty {
+                    brainURL = "http://localhost:8000"
+                }
+                #endif
             }
         }
     }
@@ -322,7 +347,7 @@ struct HardwareManagementSheet: View {
         } header: {
             Text("Enterprise Brain")
         } footer: {
-            Text("Simulator: use http://localhost:8000. Physical iPhone: use your Mac IP (same Wi‑Fi), e.g. http://192.168.1.10:8000. Generate the pb_live_ key at localhost:5173/connect.")
+            Text("Simulator: use http://localhost:8000. Physical iPhone: use your Mac IP (same Wi‑Fi). Generate the pb_live_ key at \(PenloConfig.connectURL.absoluteString).")
         }
     }
 
